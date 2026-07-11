@@ -137,6 +137,19 @@ json_object` где поддерживается) + схема в промпте
 
 Файла нет → одиночный `OpenAICompatScorer` из LLM_*-настроек (обратная совместимость).
 
+## 6.1. Источники вакансий
+
+`HHClientProto` (search_vacancies + get_vacancy) — фактически протокол «источника
+вакансий»; main.py выбирает реализацию по `settings.vacancy_source`:
+
+| Источник | Реализация | Условие |
+|---|---|---|
+| hh.ru | `from hh_agent.hh.client import HHClient` | требует app-креды (заявка на dev.hh.ru модерируется до 15 раб. дней) |
+| Работа России | `from hh_agent.trudvsem.client import TrudvsemClient` — `TrudvsemClient(settings)` | открытый API opendata.trudvsem.ru, без регистрации |
+
+`auto` (дефолт): hh при заполненных кредах, иначе trudvsem (с log.info о выборе).
+ID вакансий trudvsem префиксуются `tv-` в таблице seen, чтобы не пересекаться с hh.
+
 ## 7. Ограничения и риски
 
 - Вебхуков у hh нет — поллинг; заголовок `HH-User-Agent` обязателен на каждый запрос.

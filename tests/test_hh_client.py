@@ -181,3 +181,78 @@ async def test_captcha_required_gives_readable_error(client):
         await client.get_vacancy("7")
     assert err.value.status == 403
     assert "капчу" in str(err.value)
+
+
+# ── авторизация приложения (client_credentials) ─────────────────────────────
+
+
+@pytest.fixture
+async def auth_client():
+    hh = HHClient(
+        Settings(
+            _env_file=None,
+            hh_user_agent="hh-agent-test/1.0 (test@example.com)",
+            hh_client_id="cid",
+            hh_client_secret="csecret",
+        )
+    )
+    hh.retry_delay = 0
+    yield hh
+    await hh.close()
+
+
+@respx.mock
+async def test_app_token_requested_and_sent(auth_client):
+    """При наличии client_id/secret клиент получает app-токен и шлёт Bearer."""
+    token_route = respx.post("https://api.hh.ru/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "app-tok"})
+    )
+    search_route = respx.get("https://api.hh.ru/vacancies").mock(
+        return_value=httpx.Response(200, json={"items": [], "pages": 1})
+    )
+    await auth_client.search_vacancies(SearchQuery(text="python"))
+    assert token_route.called
+    sent = search_route.calls[0].request
+    assert sent.headers["Authorization"] == "Bearer app-tok"
+    body = token_route.calls[0].request.content.decode()
+    assert "grant_type=client_credentials" in body and "client_id=cid" in body
+
+
+@respx.mock
+async def test_app_token_reissued_on_403(auth_client):
+    """403 с валидными кредами → один перевыпуск токена и повтор запроса."""
+    tokens = iter(["old-tok", "new-tok"])
+    respx.post("https://api.hh.ru/token").mock(
+        side_effect=lambda request: httpx.Response(200, json={"access_token": next(tokens)})
+    )
+    search_route = respx.get("https://api.hh.ru/vacancies").mock(
+        side_effect=[
+            httpx.Response(403, json={"errors": [{"type": "forbidden"}]}),
+            httpx.Response(200, json={"items": [], "pages": 1}),
+        ]
+    )
+    await auth_client.search_vacancies(SearchQuery(text="python"))
+    assert search_route.call_count == 2
+    assert search_route.calls[1].request.headers["Authorization"] == "Bearer new-tok"
+
+
+@respx.mock
+async def test_anonymous_403_message_mentions_app_registration(client):
+    """Без кредов 403 даёт подсказку про регистрацию приложения на dev.hh.ru."""
+    respx.get("https://api.hh.ru/vacancies").mock(
+        return_value=httpx.Response(403, json={"errors": [{"type": "forbidden"}]})
+    )
+    with pytest.raises(HHApiError) as err:
+        await client.search_vacancies(SearchQuery(text="python"))
+    assert "dev.hh.ru" in str(err.value) and err.value.status == 403
+
+
+@respx.mock
+async def test_app_token_error_is_wrapped(auth_client):
+    """Ошибка выдачи токена (например, 400) — контрактный HHApiError."""
+    respx.post("https://api.hh.ru/token").mock(
+        return_value=httpx.Response(400, json={"error": "invalid_client"})
+    )
+    with pytest.raises(HHApiError) as err:
+        await auth_client.search_vacancies(SearchQuery(text="python"))
+    assert err.value.status == 400

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,10 @@ from .models import Resume, SearchQuery
 logger = logging.getLogger(__name__)
 
 _TITLE_MAX = 80
+
+# Дедуп уведомления «весь проход упал» между проходами: шлём при переходе
+# ok→fail и «починилось» при fail→ok, а не каждый интервал (см. ревью I1).
+_last_pass_failed = False
 
 
 async def _read_resume(settings: Settings, notifier: NotifierProto) -> Resume | None:
@@ -80,15 +85,32 @@ async def poll_once(
     settings: Settings,
 ) -> None:
     """Один проход: новые вакансии по всем активным поискам → скоринг → письмо → карточка."""
+    global _last_pass_failed
     resume = await _read_resume(settings, notifier)  # читаем один раз за проход
     if resume is None:
         return
-    for search in await storage.list_searches():
+    searches = await storage.list_searches()
+    failures: list[str] = []
+    for search in searches:
         try:
             await _process_search(search, resume, hh, scorer, storage, notifier, settings)
-        except Exception:
+        except Exception as exc:
             # ошибка по поиску — last_polled_at не сдвигаем, окно повторится
             logger.exception("Ошибка при обработке поиска %r", search.text)
+            failures.append(str(exc))
+    all_failed = bool(searches) and len(failures) == len(searches)
+    if all_failed and not _last_pass_failed:
+        # системный сбой (все поиски упали) — молчать нельзя, пользователь ждёт карточек
+        await notifier.send_text(
+            "⚠️ Проход поиска не удался целиком.\n"
+            f"Последняя ошибка: {html.escape(failures[-1][:400])}\n"
+            f"Буду повторять каждые {settings.poll_interval_minutes} мин "
+            "и сообщу, когда заработает."
+        )
+    elif _last_pass_failed and searches and not all_failed:
+        await notifier.send_text("✅ Поиск снова работает.")
+    if searches:
+        _last_pass_failed = all_failed
 
 
 def setup_scheduler(

@@ -6,8 +6,15 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    # hh.ru — только открытое API (поиск); соискательский API закрыт с 15.12.2025
+    # hh.ru — поиск через API с авторизацией приложения (client_credentials);
+    # соискательский API закрыт с 15.12.2025. Регистрация приложения: https://dev.hh.ru
     hh_user_agent: str = "hh-agent/0.1 (dev@example.com)"
+    hh_client_id: str = ""
+    hh_client_secret: str = ""
+
+    # Источник вакансий: auto = hh при заполненных hh_client_id/secret, иначе
+    # «Работа России» (opendata.trudvsem.ru — открытый API без регистрации).
+    vacancy_source: str = "auto"  # auto | hh | trudvsem
 
     # Резюме — локальный файл (plain text / markdown)
     resume_path: str = "resume.md"

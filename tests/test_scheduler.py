@@ -258,3 +258,51 @@ async def test_touch_search_gets_moment_before_search_call(tmp_path):
     assert polled_at is not None
     assert hh.search_called_at is not None
     assert before <= polled_at <= hh.search_called_at  # не позже вызова поиска
+
+
+# ── уведомление «весь проход упал» (дедуп между проходами) ───────────────────
+
+import pytest
+
+import hh_agent.scheduler as scheduler_mod
+
+
+@pytest.fixture(autouse=True)
+def _reset_pass_flag():
+    """Межпроходный флаг — модульный глобал; изолируем тесты друг от друга."""
+    scheduler_mod._last_pass_failed = False
+    yield
+    scheduler_mod._last_pass_failed = False
+
+
+class BrokenHH(FakeHH):
+    async def search_vacancies(self, query, *, date_from=None):
+        raise RuntimeError("hh <сломался> & упал")
+
+
+async def test_all_searches_failed_notifies_once_with_escaping(tmp_path):
+    notifier = FakeNotifier()
+    await poll_once(BrokenHH(), FakeScorer(), FakeStorage(), notifier, make_settings(tmp_path))
+    assert len(notifier.texts) == 1
+    assert "&lt;сломался&gt;" in notifier.texts[0]
+    assert "<сломался>" not in notifier.texts[0]
+
+
+async def test_repeated_failure_deduped_then_recovery_notice(tmp_path):
+    settings = make_settings(tmp_path)
+    notifier = FakeNotifier()
+    storage = FakeStorage()
+    await poll_once(BrokenHH(), FakeScorer(), storage, notifier, settings)
+    await poll_once(BrokenHH(), FakeScorer(), storage, notifier, settings)
+    assert len(notifier.texts) == 1  # повторный сбой не дублируется
+    await poll_once(FakeHH(found=[]), FakeScorer(), storage, notifier, settings)
+    assert len(notifier.texts) == 2
+    assert "снова работает" in notifier.texts[1]
+
+
+async def test_no_searches_means_no_failure_notice(tmp_path):
+    notifier = FakeNotifier()
+    await poll_once(
+        BrokenHH(), FakeScorer(), FakeStorage(searches=[]), notifier, make_settings(tmp_path)
+    )
+    assert notifier.texts == []
