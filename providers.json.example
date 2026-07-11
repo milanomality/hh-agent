@@ -9,12 +9,12 @@
     "name": "openrouter",
     "base_url": "https://openrouter.ai/api/v1",
     "api_key": "sk-or-ВАШ_КЛЮЧ",
-    "model": "meta-llama/llama-3.3-70b-instruct:free"
+    "model": "nvidia/nemotron-3-super-120b-a12b:free"
   },
   {
     "name": "gemini",
     "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
     "api_key": "ВАШ_КЛЮЧ_AI_STUDIO",
-    "model": "gemini-2.5-flash"
+    "model": "gemini-flash-latest"
   }
 ]
