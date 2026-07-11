@@ -5,7 +5,7 @@ description = "Личный ИИ-агент поиска работы на hh.ru
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
-    "aiogram>=3.29",
+    "aiogram[proxy]>=3.29",  # [proxy] = aiohttp-socks: aiohttp не читает HTTPS_PROXY сам
     "anthropic>=0.116",
     "openai>=1.40",
     "pydantic>=2.7",
