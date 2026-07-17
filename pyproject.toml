@@ -1,17 +1,19 @@
 [project]
 name = "hh-agent"
 version = "0.1.0"
-description = "Личный ИИ-агент поиска работы на hh.ru: мониторинг, скоринг, отклики, Telegram-интерфейс"
+description = "Личный ИИ-агент поиска работы на hh.ru: мониторинг, скоринг, отклики, веб-интерфейс"
 requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
-    "aiogram[proxy]>=3.29",  # [proxy] = aiohttp-socks: aiohttp не читает HTTPS_PROXY сам
     "anthropic>=0.116",
     "openai>=1.40",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "apscheduler>=3.10",
     "aiosqlite>=0.20",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "itsdangerous>=2.2",  # подпись сессионной куки (Starlette SessionMiddleware)
 ]
 
 [project.optional-dependencies]

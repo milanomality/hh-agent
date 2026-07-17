@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 import respx
@@ -187,15 +189,21 @@ async def test_captcha_required_gives_readable_error(client):
 
 
 @pytest.fixture
-async def auth_client():
-    hh = HHClient(
-        Settings(
-            _env_file=None,
-            hh_user_agent="hh-agent-test/1.0 (test@example.com)",
-            hh_client_id="cid",
-            hh_client_secret="csecret",
-        )
+def auth_settings(tmp_path):
+    # кэш токена — в tmp, чтобы персист не писал .tokens.json в репозиторий и
+    # не протекал между тестами
+    return Settings(
+        _env_file=None,
+        hh_user_agent="hh-agent-test/1.0 (test@example.com)",
+        hh_client_id="cid",
+        hh_client_secret="csecret",
+        hh_token_cache_path=str(tmp_path / "tokens.json"),
     )
+
+
+@pytest.fixture
+async def auth_client(auth_settings):
+    hh = HHClient(auth_settings)
     hh.retry_delay = 0
     yield hh
     await hh.close()
@@ -256,3 +264,86 @@ async def test_app_token_error_is_wrapped(auth_client):
     with pytest.raises(HHApiError) as err:
         await auth_client.search_vacancies(SearchQuery(text="python"))
     assert err.value.status == 400
+
+
+# ── персист app-токена на диск (переживает рестарт: hh троттлит выдачу) ──────
+
+
+@respx.mock
+async def test_app_token_persisted_and_reused_across_restart(auth_settings):
+    """Токен, выданный одному клиенту, переиспользуется новым без запроса /token."""
+    token_route = respx.post("https://api.hh.ru/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "app-tok", "expires_in": 86400})
+    )
+    respx.get("https://api.hh.ru/vacancies").mock(
+        return_value=httpx.Response(200, json={"items": [], "pages": 1})
+    )
+    first = HHClient(auth_settings)
+    first.retry_delay = 0
+    await first.search_vacancies(SearchQuery(text="python"))
+    await first.close()
+    assert token_route.call_count == 1
+
+    # новый процесс (новый клиент) с тем же файлом-кэшем — /token не дёргается
+    second = HHClient(auth_settings)
+    second.retry_delay = 0
+    await second.search_vacancies(SearchQuery(text="python"))
+    await second.close()
+    assert token_route.call_count == 1  # переиспользован токен с диска
+
+
+@respx.mock
+async def test_expired_cached_token_is_refetched(auth_settings, tmp_path):
+    """Протухший токен в кэше игнорируется — запрашивается свежий."""
+    (tmp_path / "tokens.json").write_text(
+        json.dumps({"access_token": "stale", "expires_at": 0}), encoding="utf-8"
+    )
+    token_route = respx.post("https://api.hh.ru/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "fresh", "expires_in": 86400})
+    )
+    search_route = respx.get("https://api.hh.ru/vacancies").mock(
+        return_value=httpx.Response(200, json={"items": [], "pages": 1})
+    )
+    hh = HHClient(auth_settings)
+    hh.retry_delay = 0
+    await hh.search_vacancies(SearchQuery(text="python"))
+    await hh.close()
+    assert token_route.called
+    assert search_route.calls[0].request.headers["Authorization"] == "Bearer fresh"
+
+
+@pytest.mark.parametrize("bad", ["null", "42", "[]", '"tok"', "{ broken", ""])
+@respx.mock
+async def test_corrupt_token_cache_falls_back_to_fetch(auth_settings, tmp_path, bad):
+    """Битый/не-объектный файл-кэша не роняет проход — запрашивается свежий токен."""
+    (tmp_path / "tokens.json").write_text(bad, encoding="utf-8")
+    respx.post("https://api.hh.ru/token").mock(
+        return_value=httpx.Response(200, json={"access_token": "fresh", "expires_in": 86400})
+    )
+    search_route = respx.get("https://api.hh.ru/vacancies").mock(
+        return_value=httpx.Response(200, json={"items": [], "pages": 1})
+    )
+    hh = HHClient(auth_settings)
+    hh.retry_delay = 0
+    await hh.search_vacancies(SearchQuery(text="python"))  # не должно бросить
+    await hh.close()
+    assert search_route.calls[0].request.headers["Authorization"] == "Bearer fresh"
+
+
+@respx.mock
+async def test_403_invalidates_cached_token(auth_client, tmp_path):
+    """403 стирает файл-кэша — отозванный токен не перечитывается из него."""
+    tokens = iter(["old-tok", "new-tok"])
+    respx.post("https://api.hh.ru/token").mock(
+        side_effect=lambda request: httpx.Response(200, json={"access_token": next(tokens)})
+    )
+    respx.get("https://api.hh.ru/vacancies").mock(
+        side_effect=[
+            httpx.Response(403, json={"errors": [{"type": "forbidden"}]}),
+            httpx.Response(200, json={"items": [], "pages": 1}),
+        ]
+    )
+    await auth_client.search_vacancies(SearchQuery(text="python"))
+    # на диске лежит перевыпущенный токен, а не отозванный old-tok
+    cached = json.loads((tmp_path / "tokens.json").read_text(encoding="utf-8"))
+    assert cached["access_token"] == "new-tok"

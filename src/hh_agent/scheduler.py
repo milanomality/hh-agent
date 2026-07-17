@@ -22,6 +22,11 @@ _TITLE_MAX = 80
 _last_pass_failed = False
 
 
+def get_pass_failed() -> bool:
+    """Упал ли последний проход поиска целиком (для /api/status)."""
+    return _last_pass_failed
+
+
 async def _read_resume(settings: Settings, notifier: NotifierProto) -> Resume | None:
     """Резюме из локального файла settings.resume_path; None — прервать проход.
 
@@ -70,7 +75,7 @@ async def _process_search(
             if score.score >= settings.score_threshold:
                 letter = await scorer.write_cover_letter(vacancy, resume, score)
                 await storage.save_letter(stub.id, letter)
-                await notifier.send_vacancy_card(vacancy, score, letter)
+                await notifier.send_vacancy_card(vacancy, score, letter, search_id=search.id)
         except Exception:
             logger.exception("Ошибка при обработке вакансии %s", stub.id)
     if search.id is not None:

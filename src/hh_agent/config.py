@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     hh_user_agent: str = "hh-agent/0.1 (dev@example.com)"
     hh_client_id: str = ""
     hh_client_secret: str = ""
+    # app-токен кэшируется на диск, чтобы переживать рестарты: hh троттлит
+    # повторную выдачу («app token refresh too early»). Файл — в .gitignore.
+    hh_token_cache_path: str = ".tokens.json"
 
     # Источник вакансий: auto = hh при заполненных hh_client_id/secret, иначе
     # «Работа России» (opendata.trudvsem.ru — открытый API без регистрации).
@@ -19,9 +22,14 @@ class Settings(BaseSettings):
     # Резюме — локальный файл (plain text / markdown)
     resume_path: str = "resume.md"
 
-    # Telegram
-    telegram_bot_token: str = ""
-    telegram_chat_id: int = 0
+    # Веб-интерфейс (пришёл на смену Telegram). web_password/web_secret обязательны
+    # при старте (проверяется в lifespan). Доступ удалённый → авторизация по паролю.
+    web_password: str = ""            # единый пароль на вход
+    web_secret: str = ""              # секрет подписи сессионной куки (itsdangerous)
+    web_host: str = "0.0.0.0"
+    web_port: int = 8000
+    web_secure_cookie: bool = True    # кука только по HTTPS; для голого LAN-теста → False
+    frontend_dist: str = ""           # путь к собранному SPA (пусто → dist рядом с пакетом)
 
     # LLM-провайдер. По умолчанию — бесплатный OpenAI-совместимый (Groq / OpenRouter /
     # Gemini compat / локальная Ollama — задаётся base_url + model).

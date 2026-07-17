@@ -10,13 +10,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from .config import Settings
 from .models import (
     Application,
+    Card,
+    CardStatus,
+    Event,
     Resume,
     ScoreResult,
     SearchQuery,
@@ -54,7 +55,7 @@ class StorageProto(Protocol):
     async def mark_seen(self, vacancy_id: str, score: ScoreResult | None = None) -> None: ...
     async def set_favorite(self, vacancy_id: str, fav: bool = True) -> None: ...
 
-    # сопроводительные письма (пишет поллер, читает бот при отметке отклика)
+    # сопроводительные письма (пишет поллер, читает API при отметке отклика)
     async def save_letter(self, vacancy_id: str, letter: str) -> None: ...
     async def get_letter(self, vacancy_id: str) -> str | None: ...
 
@@ -70,21 +71,53 @@ class StorageProto(Protocol):
     async def save_application(self, app: Application) -> None: ...
     async def list_applications(self) -> list[Application]: ...
 
+    # карточки оценённых вакансий (веб-фид: пишет поллер через WebNotifier, читает API)
+    async def save_card(
+        self,
+        vacancy: Vacancy,
+        score: ScoreResult,
+        letter: str | None,
+        *,
+        search_id: int | None = None,
+    ) -> None: ...
+    async def get_card(self, vacancy_id: str) -> Card | None: ...
+    async def list_cards(
+        self,
+        *,
+        min_score: int | None = None,
+        favorite: bool | None = None,
+        status: CardStatus | str | None = None,
+        search_id: int | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Card]: ...
+    async def count_cards(
+        self,
+        *,
+        min_score: int | None = None,
+        favorite: bool | None = None,
+        status: CardStatus | str | None = None,
+        search_id: int | None = None,
+    ) -> int: ...
+    async def mark_card_applied(self, vacancy_id: str) -> None: ...
+    async def mark_card_skipped(self, vacancy_id: str) -> None: ...
+    async def set_card_favorite(self, vacancy_id: str, fav: bool = True) -> None: ...
+
+    # системные уведомления (то, что раньше слал send_text в Telegram)
+    async def add_event(self, text: str, level: str = "info") -> None: ...
+    async def list_events(self, limit: int = 50, offset: int = 0) -> list[Event]: ...
+
 
 class NotifierProto(Protocol):
-    """Канал уведомлений пользователю (реализует модуль bot/)."""
+    """Канал уведомлений пользователю (реализует модуль web/ — WebNotifier)."""
 
     async def send_vacancy_card(
-        self, vacancy: Vacancy, score: ScoreResult, letter: str | None
+        self,
+        vacancy: Vacancy,
+        score: ScoreResult,
+        letter: str | None,
+        *,
+        search_id: int | None = None,
     ) -> None: ...
 
     async def send_text(self, text: str) -> None: ...
-
-
-@dataclass
-class BotDeps:
-    """Зависимости, которые Telegram-бот получает при создании."""
-
-    storage: StorageProto
-    scorer: ScorerProto
-    settings: Settings

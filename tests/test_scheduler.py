@@ -14,9 +14,7 @@ def make_settings(tmp_path, resume: str | None = RESUME_TEXT, **kw) -> Settings:
     resume_file = tmp_path / "resume.md"
     if resume is not None:
         resume_file.write_text(resume, encoding="utf-8")
-    return Settings(
-        _env_file=None, telegram_bot_token="token", resume_path=str(resume_file), **kw
-    )
+    return Settings(_env_file=None, resume_path=str(resume_file), **kw)
 
 
 def vac(vid: str) -> Vacancy:
@@ -112,10 +110,12 @@ class FakeStorage:
 class FakeNotifier:
     def __init__(self):
         self.cards: list[tuple[str, int, str | None]] = []
+        self.card_search_ids: list[int | None] = []
         self.texts: list[str] = []
 
-    async def send_vacancy_card(self, vacancy, score, letter):
+    async def send_vacancy_card(self, vacancy, score, letter, *, search_id=None):
         self.cards.append((vacancy.id, score.score, letter))
+        self.card_search_ids.append(search_id)
 
     async def send_text(self, text):
         self.texts.append(text)
@@ -132,6 +132,7 @@ async def test_new_vacancy_scored_and_notified(tmp_path):
     assert storage.seen == {"1": 9}
     assert storage.letters == {"1": "письмо для 1"}
     assert notifier.cards == [("1", 9, "письмо для 1")]
+    assert notifier.card_search_ids == [1]  # search.id проброшен в карточку
     assert [sid for sid, _ in storage.touched] == [1]
 
 

@@ -9,3 +9,5 @@ build/
 *.egg-info/
 providers.json
 resume.*
+node_modules/
+frontend/dist/
